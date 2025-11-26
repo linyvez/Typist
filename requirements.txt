@@ -1,9 +1,11 @@
 torch>=2.0.0
 torchaudio
 torchcodec
-transformers>=4.41.0
+transformers>=4.42.4
 datasets
 evaluate
+
+TTS
 
 tqdm
 matplotlib

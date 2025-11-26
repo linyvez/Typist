@@ -208,5 +208,5 @@ __marimo__/
 
 # Custom
 data/raw
-data/processed
+data/prepared
 results/

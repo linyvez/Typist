@@ -6,8 +6,8 @@ from transformers import Wav2Vec2ForCTC, Wav2Vec2Processor
 
 print("Model is initializing, please wait.")
 
-processor = Wav2Vec2Processor.from_pretrained("./results/Wav2Vec2-base-LibriSpeech100h")
-model = Wav2Vec2ForCTC.from_pretrained("./results/Wav2Vec2-base-LibriSpeech100h")
+processor = Wav2Vec2Processor.from_pretrained("./results/Wav2Vec2-base-LibriSpeech100h-Custom")
+model = Wav2Vec2ForCTC.from_pretrained("./results/Wav2Vec2-base-LibriSpeech100h-Custom")
 
 model.eval()
 
@@ -36,21 +36,57 @@ def transcribe(audio):
 
     return text.lower()
 
+################ LIST OF COMMANDS #################
+
+    # - "Clear all"
+    # - "Send all" 
+    # - "Enter all" 
+    # - "Delete last word" 
+    # - "Delete last sentence"
+    # - "Place dot"
+    # - "Place period"
+    # - "New paragraph"
+    # - "Insert phone number"
+    # - "Insert mail"
+    # - "Stop listening"
+    
+###################################################
+
 def process_command(text):
     print("Typist recognized the following:", text)
 
     if "delete last word" in text:
+        content = text.replace("delete last word", "").strip()
+        keyboard.write(content)
         keyboard.send("ctrl+backspace")
         print("Deleted last word (or at least tried to).")
     elif "clear all" in text:
         keyboard.send("ctrl+a")
         keyboard.send("backspace")
         print("Cleared all text (or at least tried to).")
-    elif "enter" in text:
-        content = text.replace("enter", "").strip()
+    elif "enter all" in text:
+        content = text.replace("enter all", "").strip()
+        keyboard.write(content)
+        keyboard.send("enter")
+        print("Entered text")
+    elif "send all" in text:
+        content = text.replace("send all", "").strip()
         keyboard.write(content)
         keyboard.send("enter")
         print("Sent text")
+    elif "place dot" in text:
+        content = text.replace("place dot", ".").strip()
+        keyboard.write(content)
+        print("Placed a dot")
+    elif "insert mail" in text:
+        content = text.replace("insert mail", "helloworld@gmail.com").strip()
+        keyboard.write(content)
+        print("Inserted your email")
+    elif "new paragraph" in text:
+        content = text.replace("new paragraph", "").strip()
+        keyboard.write(content)
+        keyboard.send("shift+enter")
+        print("Started new paragraph")
     else:
         keyboard.write(text + " ") # default dictation
 

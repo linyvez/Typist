@@ -1,125 +1,76 @@
-from torchaudio.datasets import LIBRISPEECH
-from pathlib import Path
-import torchaudio
-from transformers import (
-    Wav2Vec2CTCTokenizer,
-    Wav2Vec2ForCTC,
-    Trainer,
-    TrainingArguments,
-    logging
-)
-from torch.utils.data import Dataset
-import evaluate
+import sounddevice as sd
+import numpy as np
 import torch
-import warnings
+import keyboard
+from transformers import Wav2Vec2ForCTC, Wav2Vec2Processor
 
-warnings.filterwarnings("ignore", category=UserWarning)
-logging.set_verbosity_error()
+print("Model is initializing, please wait.")
 
-# loading dataset
-root = Path("data/raw/LIBRISPEECH")
-root.mkdir(parents=True, exist_ok=True)
+processor = Wav2Vec2Processor.from_pretrained("./results/Wav2Vec2-base-LibriSpeech100h")
+model = Wav2Vec2ForCTC.from_pretrained("./results/Wav2Vec2-base-LibriSpeech100h")
 
-train_dataset = LIBRISPEECH(root=root, url="train-clean-100", download=True)
-eval_dataset = LIBRISPEECH(root=root, url="dev-clean", download=True)
+model.eval()
 
-# tokenizing transcripts
-tokenizer = Wav2Vec2CTCTokenizer.from_pretrained("facebook/wav2vec2-base")
+SAMPLE_RATE = 16000
+CHUNK_DURATION = 2
 
-class LibriSpeechDataset(Dataset):
-    def __init__(self, torchaudio_dataset, tokenizer):
-        self.dataset = torchaudio_dataset
-        self.tokenizer = tokenizer
+def record_audio():
+    print("Typist is listening...")
 
-    def __getitem__(self, idx):
-        data = self.dataset[idx]
+    audio = sd.rec(int(CHUNK_DURATION * SAMPLE_RATE), samplerate=SAMPLE_RATE, channels=1, dtype='float32')
+    sd.wait()
 
-        if len(data) == 2:
-            waveform, sr = data
-            transcript = ""
-        else:
-            waveform, sr, transcript, *_ = data
+    audio = audio.flatten()
+    audio = audio / (np.max(np.abs(audio)) + 1e-9)
 
-        if sr != 16000:
-            waveform = torchaudio.transforms.Resample(sr, 16000)(waveform)
-        input_values = waveform.squeeze(0).numpy()
-        labels = self.tokenizer(transcript).input_ids
-        return {"input_values": input_values, "labels": labels}
+    return audio
 
-    def __len__(self):
-        return len(self.dataset)
+def transcribe(audio):
+    inputs = processor(audio, sampling_rate=SAMPLE_RATE, return_tensors="pt")
 
+    with torch.no_grad():
+        logits = model(inputs.input_values).logits
+    
+    preds = torch.argmax(logits, dim=-1)
+    text = processor.batch_decode(preds)[0]
 
-train_dataset = LibriSpeechDataset(train_dataset, tokenizer)
-eval_dataset = LibriSpeechDataset(eval_dataset, tokenizer)
+    return text.lower()
 
-# initializing wav2vec2 model
-model = Wav2Vec2ForCTC.from_pretrained("facebook/wav2vec2-base")
-model.freeze_feature_encoder()
+def process_command(text):
+    print("Typist recognized the following:", text)
 
-def data_collator(batch):
-    input_values = [torch.tensor(b["input_values"]) for b in batch]
-    labels = [torch.tensor(b["labels"]) for b in batch]
+    if "delete last word" in text:
+        keyboard.send("ctrl+backspace")
+        print("Deleted last word (or at least tried to).")
+    elif "clear all" in text:
+        keyboard.send("ctrl+a")
+        keyboard.send("backspace")
+        print("Cleared all text (or at least tried to).")
+    elif "enter" in text:
+        content = text.replace("enter", "").strip()
+        keyboard.write(content)
+        keyboard.send("enter")
+        print("Sent text")
+    else:
+        keyboard.write(text + " ") # default dictation
 
-    input_values = torch.nn.utils.rnn.pad_sequence(input_values, batch_first=True)
-    labels = torch.nn.utils.rnn.pad_sequence(labels, batch_first=True, padding_value=-100)
+def is_silence(audio, threshold=0.1):
+    rms = np.sqrt(np.mean(audio ** 2))
+    print(rms)
+    return rms < threshold
 
-    return {"input_values": input_values, "labels": labels}
+def main():
+    print("Typist started. Press CTRL+C to stop.")
 
-# training, fine-tuning
-wer_metric = evaluate.load("wer")
-cer_metric = evaluate.load("cer")
+    while True:
+        audio = record_audio()
 
-def compute_metrics(pred):
-    pred_logits = pred.predictions
-    pred_ids = torch.argmax(torch.tensor(pred_logits), dim=-1)
+        if is_silence(audio):
+            print("Skip silence...")
+            continue
 
-    # decode
-    pred_str = tokenizer.batch_decode(pred_ids)
-    label_ids = pred.label_ids
-    label_ids[label_ids == -100] = tokenizer.pad_token_id
-    label_str = tokenizer.batch_decode(label_ids)
+        text = transcribe(audio)
+        process_command(text)
 
-    return {
-        "wer": wer_metric.compute(predictions=pred_str, references=label_str),
-        "cer": cer_metric.compute(predictions=pred_str, references=label_str)
-    }
-
-training_args = TrainingArguments(
-    output_dir="./results",
-    eval_strategy="epoch",
-    save_strategy="epoch",
-    learning_rate=1e-5,
-    per_device_train_batch_size=8,
-    per_device_eval_batch_size=8,
-    num_train_epochs=3,
-    logging_strategy="steps",
-    logging_steps=50,
-    fp16=torch.cuda.is_available(),
-    max_grad_norm=1.0,
-    gradient_accumulation_steps=2,
-    report_to=[],
-)
-
-trainer = Trainer(
-    model=model,
-    args=training_args,
-    train_dataset=train_dataset,
-    eval_dataset=eval_dataset,
-    data_collator=data_collator,
-    compute_metrics=compute_metrics,
-)
-
-trainer.train()
-
-# metrics
-eval_results = trainer.evaluate()
-print(f"Validation WER: {eval_results['eval_wer']}")
-print(f"Validation CER: {eval_results['eval_cer']}")
-
-test_dataset = LIBRISPEECH(root=root, url="test-clean", download=True)
-test_dataset = LibriSpeechDataset(test_dataset)
-
-test_results = trainer.evaluate(test_dataset)
-print(f"Test WER: {test_results['eval_wer']:.4f}")
-print(f"Test CER: {test_results['eval_cer']:.4f}")
+if __name__ == "__main__":
+    main()

@@ -14,9 +14,9 @@ import queue
 import collections
 import time
 
-import language_tool_python
 import pyperclip
 import pyautogui
+from happytransformer import HappyTextToText, TTSettings
 
 SAMPLE_RATE = 16000
 CHUNK_DURATION_MS = 30
@@ -26,13 +26,14 @@ VAD_AGGRESSIVENESS = 2 # ignore background noise
 
 print("Loading the model...")
 
-processor = Wav2Vec2Processor.from_pretrained("./results/Wav2Vec2-base-LibriSpeech100h-Custom")
-model = Wav2Vec2ForCTC.from_pretrained("./results/Wav2Vec2-base-LibriSpeech100h-Custom")
+processor = Wav2Vec2Processor.from_pretrained("./results/Wav2Vec2-base-LibriSpeech360h-Custom")
+model = Wav2Vec2ForCTC.from_pretrained("./results/Wav2Vec2-base-LibriSpeech360h-Custom")
 
 model.eval()
 
 print("Loading grammar checker...")
-grammar_tool = language_tool_python.LanguageTool('en-US')
+happy_tt = HappyTextToText("T5", "vennify/t5-base-grammar-correction")
+args = TTSettings(num_beams=5, min_length=1)
 
 class RecordAudio:
     def __init__(self, sample_rate, chunk_duration_ms, padding_ms, silence_duration_ms, vad_level):
@@ -125,14 +126,15 @@ def transcribe(audio):
     # - "Send all" 
     # - "Enter all" 
     # - "Delete last word" 
-    # - "Delete (n) words" - currently can be unstable
+    # - "Delete (n) words",  1 < n < 13, 20, 30
     # - "Place dot"
     # - "Place period"
     # - "New paragraph"
     # - "Insert phone number"
     # - "Insert mail"
-    # - "Place space" - currently can be unstable
-    # - "Check text" - currently can be unstable
+    # - "Place space"
+    # - "Check text"
+    # - "Check grammar"
     # - "Stop listening"
     # - "Sleep Typist"
     
@@ -191,8 +193,16 @@ class TypistApp:
             self.log("Clipboard is empty.")
             return
 
-        matches = grammar_tool.check(raw_text)
-        corrected_text = language_tool_python.utils.correct(raw_text, matches)
+        sentences = raw_text.split(". ")
+
+        corrected_sentences = []
+
+        for sentence in sentences:
+            if sentence.strip():
+                result = happy_tt.generate_text(f"grammar: {sentence}", args=args)
+                corrected_sentences.append(result.text)
+
+        corrected_text = " ".join(corrected_sentences)
 
         if corrected_text != raw_text:
             pyperclip.copy(corrected_text)
@@ -209,9 +219,13 @@ class TypistApp:
         
         self.log(f"Typist recognized the following: {text}")
 
-        if "check text" in text:
+        if "check text" in text or "check grammar" in text:
+            content = text.replace("check text", "").strip() if text == "check text" else text.replace("check grammar", "").strip()
+            keyboard.write(content)
             self.execute_grammar_check()
         elif "delete last word" in text:
+            content = text.replace("delete last word", "").strip()
+            keyboard.write(content)
             keyboard.send("ctrl+backspace")
             self.log("[Deleted last word]")
         elif "delete" in text and "words" in text:
@@ -236,25 +250,39 @@ class TypistApp:
             else:
                 self.log("[Error: Could not understand how many words to delete]")
         elif "clear all" in text:
+            content = text.replace("clear all", "").strip()
+            keyboard.write(content)
             keyboard.send("ctrl+a")
             keyboard.send("backspace")
             self.log("[Cleared all text]")
         elif "enter all" in text or "send all" in text:
+            content = text.replace("enter all", "").strip() if text == "enter all" else text.replace("send all", "").strip()
+            keyboard.write(content)
             keyboard.send("enter")
             self.log("[Sent text]")
         elif "place dot" in text or "place period" in text:
+            content = text.replace("place dot", "").strip() if text == "place dot" else text.replace("place period", "").strip()
+            keyboard.write(content)
             keyboard.write(".")
             self.log("[Placed a dot]")
         elif "insert mail" in text:
-            keyboard.write("helloworld@gmail.com") # can be personalized later
+            content = text.replace("insert mail", "").strip()
+            keyboard.write(content)
+            keyboard.write(" helloworld@gmail.com ") # can be personalized later
             self.log("[Inserted email]")
         elif "insert phone number" in text:
-            keyboard.write("(777) 777-7777") # can be personalized later
+            content = text.replace("insert phone number", "").strip()
+            keyboard.write(content)
+            keyboard.write(" (777) 777-7777 ") # can be personalized later
             self.log("[Inserted phone number]")
         elif "new paragraph" in text:
+            content = text.replace("new paragraph", "").strip()
+            keyboard.write(content)
             keyboard.send("shift+enter")
             self.log("[Started new paragraph]")
         elif "place space" in text:
+            content = text.replace("place space", "").strip()
+            keyboard.write(content)
             keyboard.write(" ")
             self.log("[Placed space]")
         else:

@@ -4,6 +4,7 @@ torchcodec
 transformers>=4.42.4
 datasets
 evaluate
+threading
 
 TTS
 webrtcvad
@@ -16,3 +17,10 @@ numpy
 scipy
 
 jupyter
+
+happytransformer
+tkinter
+pyperclip
+pyautogui
+keyboard
+sounddevice

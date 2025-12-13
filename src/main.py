@@ -13,6 +13,7 @@ import webrtcvad
 import queue
 import collections
 import time
+import re
 
 import pyperclip
 import pyautogui
@@ -166,10 +167,52 @@ class TypistApp:
         self.quit_button = tk.Button(root, text="Exit", command=self.on_close, bg="#ffcccc")
         self.quit_button.pack(pady=5)
 
+        self.build_command_map()
+
         self.thread = threading.Thread(target=self.run_audio_loop, daemon=True)
         self.thread.start()
 
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+    
+    def build_command_map(self):
+        self.commands = {
+            "stop listening": self.sleep_typist,
+            "sleep typist": self.on_close,
+            "check text": self.execute_grammar_check,
+            "check grammar": self.execute_grammar_check,
+
+            "clear all": lambda: self.send_keys("ctrl+a", "backspace"),
+            "delete last word": lambda: self.send_keys("ctrl+backspace"),
+            "place dot": lambda: keyboard.write("."),
+            "place period": lambda: keyboard.write("."),
+            "place space": lambda: keyboard.write(" "),
+            "new paragraph": lambda: self.send_keys("shift+enter"),
+            
+            "send all": lambda: keyboard.send("enter"),
+            "enter all": lambda: keyboard.send("enter"),
+
+            "insert mail": lambda: keyboard.write(" helloworld@gmail.com "),
+            "insert phone number": lambda: keyboard.write(" (777) 777-7777 "),
+        }
+
+        for word, num in WORD_TO_NUM.items():
+            self.commands[f"delete {word} words"] = lambda n=num: self.delete_n_words(n)
+    
+    def send_keys(self, *keys):
+        for k in keys:
+            keyboard.send(k)
+            time.sleep(0.05)
+
+    def sleep_typist(self):
+        self.is_awake = False
+        self.update_status_ui(False)
+        self.log("Turned off... Say 'Wake up Typist' to continue")
+
+    def delete_n_words(self, n):
+        self.log(f"[Action: Deleting last {n} words]")
+        for _ in range(n):
+            keyboard.send("ctrl+backspace")
+            time.sleep(0.05)
     
     def log(self, message):
         self.log_area.insert(tk.END, message + "\n")
@@ -219,75 +262,31 @@ class TypistApp:
         
         self.log(f"Typist recognized the following: {text}")
 
-        if "check text" in text or "check grammar" in text:
-            content = text.replace("check text", "").strip() if text == "check text" else text.replace("check grammar", "").strip()
-            keyboard.write(content)
-            self.execute_grammar_check()
-        elif "delete last word" in text:
-            content = text.replace("delete last word", "").strip()
-            keyboard.write(content)
-            keyboard.send("ctrl+backspace")
-            self.log("[Deleted last word]")
-        elif "delete" in text and "words" in text:
-            count = 0
-            words_in_text = text.split()
-            
-            for word in words_in_text:
-                if word in WORD_TO_NUM:
-                    count = WORD_TO_NUM[word]
-                    break
-                
-                if word.isdigit():
-                    count = int(word)
-                    break
+        sorted_phrases = sorted(self.commands.keys(), key=len, reverse=True)
+        pattern = "|".join(map(re.escape, sorted_phrases))
+        
+        current_pos = 0
 
-            if count > 0:
-                self.log(f"[Action: Deleting last {count} words...]")
-                for _ in range(count):
-                    keyboard.send("ctrl+backspace")
-                    time.sleep(0.05)
-                return True
-            else:
-                self.log("[Error: Could not understand how many words to delete]")
-        elif "clear all" in text:
-            content = text.replace("clear all", "").strip()
-            keyboard.write(content)
-            keyboard.send("ctrl+a")
-            keyboard.send("backspace")
-            self.log("[Cleared all text]")
-        elif "enter all" in text or "send all" in text:
-            content = text.replace("enter all", "").strip() if text == "enter all" else text.replace("send all", "").strip()
-            keyboard.write(content)
-            keyboard.send("enter")
-            self.log("[Sent text]")
-        elif "place dot" in text or "place period" in text:
-            content = text.replace("place dot", "").strip() if text == "place dot" else text.replace("place period", "").strip()
-            keyboard.write(content)
-            keyboard.write(".")
-            self.log("[Placed a dot]")
-        elif "insert mail" in text:
-            content = text.replace("insert mail", "").strip()
-            keyboard.write(content)
-            keyboard.write(" helloworld@gmail.com ") # can be personalized later
-            self.log("[Inserted email]")
-        elif "insert phone number" in text:
-            content = text.replace("insert phone number", "").strip()
-            keyboard.write(content)
-            keyboard.write(" (777) 777-7777 ") # can be personalized later
-            self.log("[Inserted phone number]")
-        elif "new paragraph" in text:
-            content = text.replace("new paragraph", "").strip()
-            keyboard.write(content)
-            keyboard.send("shift+enter")
-            self.log("[Started new paragraph]")
-        elif "place space" in text:
-            content = text.replace("place space", "").strip()
-            keyboard.write(content)
-            keyboard.write(" ")
-            self.log("[Placed space]")
-        else:
-            keyboard.write(text + " ") # default dictation
-            self.log(f"[Typed]: {text}")
+        for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+            start, end = match.span()
+            text_chunk = text[current_pos:start]
+            
+            if text_chunk.strip():
+                keyboard.write(text_chunk.strip() + " ")
+
+            matched_phrase = match.group().lower()
+            self.log(f"[{matched_phrase}]")
+            
+            if matched_phrase in self.commands:
+                self.commands[matched_phrase]()
+            
+            current_pos = end
+
+        remaining = text[current_pos:]
+        if remaining.strip():
+            keyboard.write(remaining.strip() + " ")
+
+        return True
 
     def run_audio_loop(self):
         self.log("Audio recording ready...")

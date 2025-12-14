@@ -226,10 +226,11 @@ class TypistApp:
 
     def execute_grammar_check(self):
         self.log("[Checking Grammar...]")
+        time.sleep(0.5)
         pyautogui.hotkey('ctrl', 'a')
         time.sleep(0.1)
         pyautogui.hotkey('ctrl', 'c')
-        time.sleep(0.1)
+        time.sleep(0.5)
         
         raw_text = pyperclip.paste()
         if not raw_text:
